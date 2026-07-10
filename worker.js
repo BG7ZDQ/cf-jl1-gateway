@@ -58,10 +58,12 @@ export default {
           const body = await request.text();
           const params = new URLSearchParams(body);
           if (params.get("pw") === env.ACCESS_PASSWORD_HASH) {
+            // 保留原始 URL 参数实现持久化分享
+            const redirectQuery = params.get("redirect") || "";
             return new Response(html, {
               status: 302,
               headers: {
-                "Location": "/",
+                "Location": "/" + (redirectQuery ? "?" + redirectQuery : ""),
                 "Content-Type": "text/html; charset=utf-8",
                 "Set-Cookie": `cf_jl1_session=${env.ACCESS_PASSWORD_HASH}; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400`
               }
@@ -101,8 +103,9 @@ export default {
     if (match) {
       const [, source, z, x, y] = match;
 
-      const mkKey = `MK_${source.toUpperCase()}`;
-      const tkKey = `TK_${source.toUpperCase()}`;
+      // Cloudflare 环境变量名不支持点号，故需与 Dashboard 存储格式一致
+      const mkKey = `MK_${source.toUpperCase().replace(/\./g, '_')}`;
+      const tkKey = `TK_${source.toUpperCase().replace(/\./g, '_')}`;
       const mk = env[mkKey];
       const tk = env[tkKey];
 
@@ -208,8 +211,10 @@ export default {
       const contentType = upstreamResponse.headers.get("Content-Type") || "image/jpeg";
       const cleanHeaders = new Headers();
       cleanHeaders.set("Content-Type", contentType);
+      // 注意：不设置 Vary 头，Cloudflare 免费计划无法自定义缓存键排除 Accept 头，
+      // Vary: Accept-Encoding 会放大不同浏览器的 Accept 差异导致的缓存碎片化。
+      // CDN 代理层根据 Cache-Control 自行缓存，瓦片格式（JPEG）与编码无关。
       cleanHeaders.set("Cache-Control", "public, max-age=31536000, immutable");
-      cleanHeaders.set("Vary", "Accept-Encoding");
       cleanHeaders.set("Access-Control-Expose-Headers", "CF-Cache-Status");
 
       const baseResponse = new Response(upstreamResponse.body, { status: 200, headers: cleanHeaders });
@@ -302,10 +307,14 @@ const authForm = String.raw`
     <h2>风信子卫星团队</h2>
     <p>请输入访问密码</p>
     <form method="POST" action="/_auth" id="authForm">
-      <input type="password" id="pwInput" name="pw" placeholder="密码" autofocus><br>
+      <input type="password" id="pwInput" name="pw" placeholder="密码" autofocus>
+      <input type="hidden" name="redirect" id="redirectInput">
+      <br>
       <button type="submit">验证</button>
     </form>
     <script>
+      // 将当前 URL 的查询参数传递到认证表单，实现登录后恢复视图
+      document.getElementById('redirectInput').value = window.location.search.substring(1);
       document.getElementById('authForm').addEventListener('submit', async function(e) {
         e.preventDefault();
         const pw = document.getElementById('pwInput').value;
